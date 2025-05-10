@@ -7,6 +7,7 @@ import (
 
 func main() {
 	const port = "8080"
+	// const logopath = "./assets/logo.png"
 
 	mux := http.NewServeMux()
 
@@ -16,6 +17,7 @@ func main() {
 	}
 
 	mux.Handle("/", http.FileServer(http.Dir(".")))
+	// mux.Handle("/assets/logo.png", http.FileServer(http.Dir(logopath)))
 
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(server.ListenAndServe())

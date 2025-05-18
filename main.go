@@ -9,12 +9,14 @@ import (
 
 	"github.com/OferRavid/chirpy/internal/config"
 	"github.com/OferRavid/chirpy/internal/database"
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
 func main() {
 	const filepathRoot = "."
 	const port = "8080"
+	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {

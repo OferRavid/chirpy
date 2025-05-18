@@ -1,32 +1,47 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"net/http"
+	"os"
 	"sync/atomic"
+
+	"github.com/OferRavid/chirpy/internal/config"
+	"github.com/OferRavid/chirpy/internal/database"
+	_ "github.com/lib/pq"
 )
 
 func main() {
-	const domain = "localhost"
+	const filepathRoot = "."
 	const port = "8080"
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("failed to open db: %s\n", err)
+		os.Exit(1)
+	}
+	dbQueries := database.New(db)
 
 	mux := http.NewServeMux()
 
-	cfg := &apiConfig{
-		fileserverHits: atomic.Int32{},
+	apiCfg := &config.ApiConfig{
+		FileserverHits: atomic.Int32{},
+		DbQueries:      dbQueries,
 	}
 
-	mux.Handle("/app/", http.StripPrefix("/app", cfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
+	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.MiddlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	mux.HandleFunc("GET /api/healthz", statusHandler)
-	mux.HandleFunc("GET /admin/metrics", cfg.metricsHandler)
-	mux.HandleFunc("POST /admin/reset", cfg.resetHandler)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.MetricsHandler)
+	mux.HandleFunc("POST /admin/reset", apiCfg.ResetHandler)
+	mux.HandleFunc("POST /api/validate_chirp", config.ValidateChirpHandler)
 
 	server := &http.Server{
 		Addr:    ":" + port,
 		Handler: mux,
 	}
 
-	log.Printf("Serving at domain: %s on port: %s\n", domain, port)
+	log.Printf("Serving files from %s on port: %s\n", filepathRoot, port)
 	log.Fatal(server.ListenAndServe())
 }
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,6 +25,14 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+}
+
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	User_id   uuid.UUID `json:"user_id"`
 }
 
 func (apiCfg *ApiConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
@@ -66,47 +75,7 @@ func (apiCfg *ApiConfig) ResetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func ValidateChirpHandler(w http.ResponseWriter, r *http.Request) {
-	type request struct {
-		Body string `json:"body"`
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	req := request{}
-	err := decoder.Decode(&req)
-	if err != nil {
-		log.Printf("Error decoding request's body: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-
-	type response struct {
-		Cleaned_body string `json:"cleaned_body"`
-		Error        string `json:"error"`
-	}
-
-	resp := response{}
-	statusCode := 0
-	if len(req.Body) > 140 {
-		resp.Error = "Chirp is too long"
-		statusCode = 400
-	} else {
-		resp.Cleaned_body = cleaner(req.Body)
-		statusCode = 200
-	}
-
-	dat, err := json.Marshal(resp)
-	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	w.Write(dat)
-}
-
-func (apiCfg *ApiConfig) CreateUserHandler(w http.ResponseWriter, r *http.Request) {
+func (apiCfg *ApiConfig) CreateUsersHandler(w http.ResponseWriter, r *http.Request) {
 	type request struct {
 		Email string `json:"email"`
 	}
@@ -122,7 +91,7 @@ func (apiCfg *ApiConfig) CreateUserHandler(w http.ResponseWriter, r *http.Reques
 
 	user, err := apiCfg.DbQueries.CreateUser(r.Context(), req.Email)
 	if err != nil {
-		log.Printf("failed to create user in database: err")
+		log.Printf("failed to create user in database: %s", err)
 		w.WriteHeader(500)
 		return
 	}
@@ -143,6 +112,81 @@ func (apiCfg *ApiConfig) CreateUserHandler(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	w.Write(dat)
+}
+
+func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	type request struct {
+		Body    string    `json:"body"`
+		User_id uuid.UUID `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	req := request{}
+	err := decoder.Decode(&req)
+	if err != nil {
+		log.Printf("Error decoding request's body: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	w, body, err := validateChirp(w, req.Body)
+	if err != nil {
+		log.Printf("Chirp failed on validation: %s", err)
+		return
+	}
+
+	chirp, err := apiCfg.DbQueries.CreateChirp(
+		r.Context(),
+		database.CreateChirpParams{
+			Body:   body,
+			UserID: req.User_id,
+		},
+	)
+	if err != nil {
+		log.Printf("Failed to create chirp in database: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+
+	resp := Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		User_id:   chirp.UserID,
+	}
+
+	dat, err := json.Marshal(resp)
+	if err != nil {
+		log.Printf("Error marshalling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write(dat)
+}
+
+func validateChirp(w http.ResponseWriter, body string) (http.ResponseWriter, string, error) {
+	type errorResponse struct {
+		Error string `json:"error"`
+	}
+	if len(body) > 140 {
+		errorResponse := errorResponse{
+			Error: "Chirp is too long",
+		}
+		dat, err := json.Marshal(errorResponse)
+		if err != nil {
+			log.Printf("Error marshalling JSON: %s", err)
+			w.WriteHeader(500)
+			return w, "", err
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		w.Write(dat)
+		return w, "", errors.New("Chirp is too long")
+	}
+	return w, cleaner(body), nil
 }
 
 func cleaner(textToClean string) string {

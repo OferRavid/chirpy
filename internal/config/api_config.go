@@ -32,7 +32,7 @@ type Chirp struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Body      string    `json:"body"`
-	User_id   uuid.UUID `json:"user_id"`
+	UserID    uuid.UUID `json:"user_id"`
 }
 
 func (apiCfg *ApiConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
@@ -76,132 +76,146 @@ func (apiCfg *ApiConfig) ResetHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (apiCfg *ApiConfig) CreateUsersHandler(w http.ResponseWriter, r *http.Request) {
-	type request struct {
+	type parameters struct {
 		Email string `json:"email"`
+	}
+	type response struct {
+		User
 	}
 
 	decoder := json.NewDecoder(r.Body)
-	req := request{}
-	err := decoder.Decode(&req)
+	params := parameters{}
+	err := decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Error decoding request's body: %s", err)
-		w.WriteHeader(500)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
 	}
 
-	user, err := apiCfg.DbQueries.CreateUser(r.Context(), req.Email)
+	user, err := apiCfg.DbQueries.CreateUser(r.Context(), params.Email)
 	if err != nil {
-		log.Printf("failed to create user in database: %s", err)
-		w.WriteHeader(500)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create user", err)
 		return
 	}
 
-	resp := User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-	}
-
-	dat, err := json.Marshal(resp)
-	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write(dat)
+	respondWithJSON(w, http.StatusCreated, response{
+		User: User{
+			ID:        user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email:     user.Email,
+		},
+	})
 }
 
 func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Request) {
-	type request struct {
-		Body    string    `json:"body"`
-		User_id uuid.UUID `json:"user_id"`
+	type parameters struct {
+		Body   string    `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
-	req := request{}
-	err := decoder.Decode(&req)
+	params := parameters{}
+	err := decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Error decoding request's body: %s", err)
-		w.WriteHeader(500)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
 	}
 
-	w, body, err := validateChirp(w, req.Body)
+	cleaned, err := validateChirp(params.Body)
 	if err != nil {
-		log.Printf("Chirp failed on validation: %s", err)
+		respondWithError(w, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 
-	chirp, err := apiCfg.DbQueries.CreateChirp(
-		r.Context(),
-		database.CreateChirpParams{
-			Body:   body,
-			UserID: req.User_id,
-		},
-	)
+	chirp, err := apiCfg.DbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleaned,
+		UserID: params.UserID,
+	})
 	if err != nil {
-		log.Printf("Failed to create chirp in database: %s", err)
-		w.WriteHeader(500)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create chirp", err)
 		return
 	}
 
-	resp := Chirp{
+	respondWithJSON(w, http.StatusCreated, Chirp{
 		ID:        chirp.ID,
 		CreatedAt: chirp.CreatedAt,
 		UpdatedAt: chirp.UpdatedAt,
 		Body:      chirp.Body,
-		User_id:   chirp.UserID,
-	}
+		UserID:    chirp.UserID,
+	})
+}
 
-	dat, err := json.Marshal(resp)
+func (apiCfg *ApiConfig) GetChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	dbChirps, err := apiCfg.DbQueries.GetChirps(r.Context())
 	if err != nil {
-		log.Printf("Error marshalling JSON: %s", err)
-		w.WriteHeader(500)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write(dat)
+
+	chirps := []Chirp{}
+	for _, dbChirp := range dbChirps {
+		chirps = append(chirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			UserID:    dbChirp.UserID,
+			Body:      dbChirp.Body,
+		})
+	}
+
+	respondWithJSON(w, http.StatusOK, chirps)
 }
 
-func validateChirp(w http.ResponseWriter, body string) (http.ResponseWriter, string, error) {
-	type errorResponse struct {
-		Error string `json:"error"`
+func (apiCfg *ApiConfig) GetChirpHandler(w http.ResponseWriter, r *http.Request) {
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse chirpID", err)
+		return
 	}
-	if len(body) > 140 {
-		errorResponse := errorResponse{
-			Error: "Chirp is too long",
-		}
-		dat, err := json.Marshal(errorResponse)
-		if err != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.WriteHeader(500)
-			return w, "", err
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(400)
-		w.Write(dat)
-		return w, "", errors.New("Chirp is too long")
+	chirp, err := apiCfg.DbQueries.GetChirpByID(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't retrieve chirp", err)
+		return
 	}
-	return w, cleaner(body), nil
+
+	respondWithJSON(w, http.StatusOK, Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	})
 }
 
-func cleaner(textToClean string) string {
-	const censoredWord = "****"
-	words := strings.Split(textToClean, " ")
-	var censored []string
-	for _, word := range words {
-		cleanWord := word
-		for _, badWord := range []string{"kerfuffle", "sharbert", "fornax"} {
-			if strings.ToLower(word) == badWord {
-				cleanWord = censoredWord
-				break
-			}
-		}
-		censored = append(censored, cleanWord)
+func validateChirp(body string) (string, error) {
+	const maxChirpLength = 140
+	if len(body) > maxChirpLength {
+		return "", errors.New("Chirp is too long")
 	}
-	return strings.Join(censored, " ")
+
+	badWords := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+	cleaned := cleaner(body, badWords)
+	return cleaned, nil
+}
+
+func cleaner(body string, badWords map[string]struct{}) string {
+	words := strings.Split(body, " ")
+	for i, word := range words {
+		loweredWord := strings.ToLower(word)
+		if _, ok := badWords[loweredWord]; ok {
+			words[i] = "****"
+		}
+	}
+	cleaned := strings.Join(words, " ")
+	return cleaned
+}
+
+func StatusHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(http.StatusText(http.StatusOK)))
 }

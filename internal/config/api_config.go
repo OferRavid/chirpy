@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/OferRavid/chirpy/internal/auth"
 	"github.com/OferRavid/chirpy/internal/database"
 	"github.com/google/uuid"
 )
@@ -77,10 +78,8 @@ func (apiCfg *ApiConfig) ResetHandler(w http.ResponseWriter, r *http.Request) {
 
 func (apiCfg *ApiConfig) CreateUsersHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email string `json:"email"`
-	}
-	type response struct {
-		User
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -91,20 +90,72 @@ func (apiCfg *ApiConfig) CreateUsersHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	user, err := apiCfg.DbQueries.CreateUser(r.Context(), params.Email)
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create hashed password", err)
+		return
+	}
+
+	user, err := apiCfg.DbQueries.CreateUser(
+		r.Context(),
+		database.CreateUserParams{
+			Email:          params.Email,
+			HashedPassword: hashedPassword,
+		},
+	)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create user", err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusCreated, response{
-		User: User{
+	respondWithJSON(
+		w,
+		http.StatusCreated,
+		User{
 			ID:        user.ID,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email,
 		},
-	})
+	)
+}
+
+func (apiCfg *ApiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
+		return
+	}
+
+	user, err := apiCfg.DbQueries.GetUserByEmail(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password", err)
+		return
+	}
+
+	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password", err)
+		return
+	}
+
+	respondWithJSON(
+		w,
+		http.StatusOK,
+		User{
+			ID:        user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.CreatedAt,
+			Email:     user.Email,
+		},
+	)
 }
 
 func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Request) {

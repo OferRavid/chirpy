@@ -26,6 +26,10 @@ func main() {
 	if platform == "" {
 		log.Fatal("PLATFORM must be set")
 	}
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		log.Fatal("JWT_SECRET environment variable is not set")
+	}
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -37,6 +41,7 @@ func main() {
 		FileserverHits: atomic.Int32{},
 		DbQueries:      dbQueries,
 		Platform:       platform,
+		Secret:         secret,
 	}
 
 	mux := http.NewServeMux()

@@ -19,6 +19,7 @@ type ApiConfig struct {
 	FileserverHits atomic.Int32
 	DbQueries      *database.Queries
 	Platform       string
+	Secret         string
 }
 
 type User struct {
@@ -122,9 +123,15 @@ func (apiCfg *ApiConfig) CreateUsersHandler(w http.ResponseWriter, r *http.Reque
 
 func (apiCfg *ApiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email            string `json:"email"`
+		Password         string `json:"password"`
+		ExpiresInSeconds int64  `json:"expires_in_seconds"`
 	}
+	// type response struct {
+	// 	User
+	// 	Token        string `json:"token"`
+	// 	RefreshToken string `json:"refresh_token"`
+	// }
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -132,6 +139,11 @@ func (apiCfg *ApiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
+	}
+
+	duration := time.Hour
+	if params.ExpiresInSeconds > 0 && params.ExpiresInSeconds < 3600 {
+		duration = time.Duration(params.ExpiresInSeconds) * time.Second
 	}
 
 	user, err := apiCfg.DbQueries.GetUserByEmail(r.Context(), params.Email)
@@ -146,29 +158,54 @@ func (apiCfg *ApiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := auth.MakeJWT(user.ID, apiCfg.Secret, duration)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create access JWT", err)
+		return
+	}
+
+	type Login struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+		Token     string    `json:"token"`
+	}
 	respondWithJSON(
 		w,
 		http.StatusOK,
-		User{
+		Login{
 			ID:        user.ID,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.CreatedAt,
 			Email:     user.Email,
+			Token:     token,
 		},
 	)
 }
 
 func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Missing token in Authorization header", err)
+		return
+	}
+
 	type parameters struct {
-		Body   string    `json:"body"`
-		UserID uuid.UUID `json:"user_id"`
+		Body string `json:"body"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
+		return
+	}
+
+	user_id, err := auth.ValidateJWT(bearerToken, apiCfg.Secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid bearerToken for user", err)
 		return
 	}
 
@@ -180,7 +217,7 @@ func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Requ
 
 	chirp, err := apiCfg.DbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   cleaned,
-		UserID: params.UserID,
+		UserID: user_id,
 	})
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create chirp", err)

@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -32,7 +33,7 @@ func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Requ
 
 	user_id, err := auth.ValidateJWT(bearerToken, apiCfg.Secret)
 	if err != nil {
-		respondWithError(w, http.StatusUnauthorized, "Invalid bearerToken for user", err)
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate token", err)
 		return
 	}
 
@@ -60,7 +61,7 @@ func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Requ
 	})
 }
 
-func (apiCfg *ApiConfig) GetChirpsHandler(w http.ResponseWriter, r *http.Request) {
+func (apiCfg *ApiConfig) RetrieveChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	dbChirps, err := apiCfg.DbQueries.GetChirps(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
@@ -81,7 +82,7 @@ func (apiCfg *ApiConfig) GetChirpsHandler(w http.ResponseWriter, r *http.Request
 	respondWithJSON(w, http.StatusOK, chirps)
 }
 
-func (apiCfg *ApiConfig) GetChirpHandler(w http.ResponseWriter, r *http.Request) {
+func (apiCfg *ApiConfig) GetChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Failed to parse chirpID", err)
@@ -127,4 +128,49 @@ func cleaner(body string, badWords map[string]struct{}) string {
 	}
 	cleaned := strings.Join(words, " ")
 	return cleaned
+}
+
+func (apiCfg *ApiConfig) DeleteChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing token in Authorization header", err)
+		return
+	}
+
+	user_id, err := auth.ValidateJWT(bearerToken, apiCfg.Secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate token", err)
+		return
+	}
+
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Failed to parse chirpID", err)
+		return
+	}
+	chirp, err := apiCfg.DbQueries.GetChirpByID(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't find chirp with the given ID", err)
+		return
+	}
+
+	if chirp.UserID != user_id {
+		respondWithError(w, http.StatusForbidden, "Unauthorized to delete chirp",
+			fmt.Errorf(
+				"user with UserID: %v attached to BearerToken: %s isn't authorized to delete chirp from user with UserID: %v",
+				user_id,
+				bearerToken,
+				chirp.UserID,
+			),
+		)
+		return
+	}
+
+	err = apiCfg.DbQueries.DeleteChirp(r.Context(), chirp.ID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete chirp", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusNoContent, nil)
 }

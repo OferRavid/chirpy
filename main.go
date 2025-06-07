@@ -30,6 +30,10 @@ func main() {
 	if secret == "" {
 		log.Fatal("JWT_SECRET environment variable is not set")
 	}
+	polka := os.Getenv("POLKA_KEY")
+	if secret == "" {
+		log.Fatal("POLKA_KEY environment variable is not set")
+	}
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -42,6 +46,7 @@ func main() {
 		DbQueries:      dbQueries,
 		Platform:       platform,
 		Secret:         secret,
+		ApiKey:         polka,
 	}
 
 	mux := http.NewServeMux()

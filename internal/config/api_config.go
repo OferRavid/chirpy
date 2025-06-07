@@ -13,6 +13,7 @@ type ApiConfig struct {
 	DbQueries      *database.Queries
 	Platform       string
 	Secret         string
+	ApiKey         string
 }
 
 type User struct {

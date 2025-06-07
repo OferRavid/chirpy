@@ -85,17 +85,11 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 }
 
 func GetBearerToken(headers http.Header) (string, error) {
-	bearerToken := headers.Get("Authorization")
-	if bearerToken == "" {
-		return "", ErrNoAuthHeaderIncluded
-	}
+	return getStringFromHeader(headers, "Bearer")
+}
 
-	splitToken := strings.Split(bearerToken, " ")
-	if len(splitToken) < 2 || splitToken[0] != "Bearer" {
-		return "", errors.New("malformed authorization header")
-	}
-
-	return splitToken[1], nil
+func GetAPIKey(headers http.Header) (string, error) {
+	return getStringFromHeader(headers, "ApiKey")
 }
 
 func MakeRefreshToken() (string, error) {
@@ -103,4 +97,17 @@ func MakeRefreshToken() (string, error) {
 	rand.Read(key)
 	token := hex.EncodeToString(key)
 	return token, nil
+}
+func getStringFromHeader(h http.Header, authType string) (string, error) {
+	headerString := h.Get("Authorization")
+	if headerString == "" {
+		return "", ErrNoAuthHeaderIncluded
+	}
+
+	splitHeaderString := strings.Split(headerString, " ")
+	if len(splitHeaderString) < 2 || splitHeaderString[0] != authType {
+		return "", errors.New("malformed authorization header")
+	}
+
+	return splitHeaderString[1], nil
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/OferRavid/chirpy/internal/auth"
@@ -99,9 +100,20 @@ func (apiCfg *ApiConfig) UpdateMembershipStatusHandler(w http.ResponseWriter, r 
 		} `json:"data"`
 	}
 
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or malformed authorization", err)
+		return
+	}
+	if apiKey != apiCfg.ApiKey {
+		err = fmt.Errorf("the apiKey in the header: %s is not authorized", apiKey)
+		respondWithError(w, http.StatusUnauthorized, "The key given doesn't match polka's apiKey", err)
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := requestParams{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return

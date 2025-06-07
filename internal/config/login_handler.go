@@ -75,10 +75,11 @@ func (apiCfg *ApiConfig) LoginHandler(w http.ResponseWriter, r *http.Request) {
 		http.StatusOK,
 		response{
 			User: User{
-				ID:        user.ID,
-				CreatedAt: user.CreatedAt,
-				UpdatedAt: user.CreatedAt,
-				Email:     user.Email,
+				ID:          user.ID,
+				CreatedAt:   user.CreatedAt,
+				UpdatedAt:   user.CreatedAt,
+				Email:       user.Email,
+				IsChirpyRed: user.IsChirpyRed,
 			},
 			Token:        token,
 			RefreshToken: refreshToken.Token,

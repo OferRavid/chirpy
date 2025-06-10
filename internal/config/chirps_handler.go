@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/OferRavid/chirpy/internal/auth"
@@ -63,6 +64,7 @@ func (apiCfg *ApiConfig) CreateChirpsHandler(w http.ResponseWriter, r *http.Requ
 
 func (apiCfg *ApiConfig) RetrieveChirpsHandler(w http.ResponseWriter, r *http.Request) {
 	author_id := r.URL.Query().Get("author_id")
+	sortType := r.URL.Query().Get("sort")
 	dbChirps, err := apiCfg.DbQueries.GetChirps(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
@@ -71,15 +73,20 @@ func (apiCfg *ApiConfig) RetrieveChirpsHandler(w http.ResponseWriter, r *http.Re
 
 	chirps := []Chirp{}
 	for _, dbChirp := range dbChirps {
-		if author_id != "" && author_id == dbChirp.UserID.String() {
-			chirps = append(chirps, Chirp{
-				ID:        dbChirp.ID,
-				CreatedAt: dbChirp.CreatedAt,
-				UpdatedAt: dbChirp.UpdatedAt,
-				UserID:    dbChirp.UserID,
-				Body:      dbChirp.Body,
-			})
+		if author_id != "" && author_id != dbChirp.UserID.String() {
+			continue
 		}
+		chirps = append(chirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			UserID:    dbChirp.UserID,
+			Body:      dbChirp.Body,
+		})
+	}
+
+	if sortType == "desc" {
+		sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
 	}
 
 	respondWithJSON(w, http.StatusOK, chirps)

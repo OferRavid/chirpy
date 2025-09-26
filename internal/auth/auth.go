@@ -98,6 +98,7 @@ func MakeRefreshToken() (string, error) {
 	token := hex.EncodeToString(key)
 	return token, nil
 }
+
 func getStringFromHeader(h http.Header, authType string) (string, error) {
 	headerString := h.Get("Authorization")
 	if headerString == "" {
